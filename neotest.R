@@ -14,19 +14,26 @@ main <- function() {
     )
   }
 
-  reporter <- MultiReporter$new(
-    reporters = list(neotest_reporter, ProgressReporter$new())
+  test_args <- list(
+    args$path,
+    reporter = MultiReporter$new(
+      reporters = list(neotest_reporter, ProgressReporter$new())
+    ),
+    load_package = "source"
   )
 
   run_test <- switch(args$type,
-    dir = test_dir,
+    dir = {
+      test_args$load_package <- NULL
+      test_local
+    },
     file = test_file,
     test = test_pruned(args$root),
     namespace = test_pruned(args$root),
     stop("Unsupported test node type: ", args$type)
   )
 
-  run_test(args$path, reporter = reporter, load_package = "source")
+  do.call(run_test, test_args)
 }
 
 NeotestReporter <- R6::R6Class("NeotestReporter", # nolint: object_name
