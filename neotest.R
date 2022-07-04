@@ -1,35 +1,44 @@
-parse_args <- function() {
-  raw <- commandArgs(trailingOnly = TRUE)
+library(testthat)
 
-  pointer <- 1L
-  args <- list()
-  while (pointer <= length(raw)) {
-    curr <- raw[pointer]
-    if (grepl("^--", curr)) {
-      pointer <- pointer + 1
-      name <- sub("^--", "", curr)
-      args[[name]] <- raw[pointer]
-    } else {
-      stop("Failed to parse commandline argument: ", curr)
-    }
-    pointer <- pointer + 1
+main <- function() {
+  args <- parse_args()
+
+  neotest_reporter <- NeotestReporter$new(
+    file = args$out, lookup = args$lookup
+  )
+
+  if (identical(args$type, "test")) {
+    neotest_reporter$real_filename <- normalizePath(
+      args$realpath,
+      mustWork = TRUE
+    )
   }
 
-  args
+  reporter <- MultiReporter$new(
+    reporters = list(neotest_reporter, ProgressReporter$new())
+  )
+
+  run_test <- switch(args$type,
+    dir = test_dir,
+    file = test_file,
+    test = test_single(args$root),
+    stop("Unsupported type: ", args$type)
+  )
+
+  run_test(args$path, reporter = reporter, load_package = "source")
 }
 
-`%||%` <- function(x, y) {
-  if (is.null(x)) y else x
-}
-
-NeotestReporter <- R6::R6Class("NeotestReporter",
+NeotestReporter <- R6::R6Class("NeotestReporter", # nolint: object_name
   inherit = testthat::Reporter,
   public = list(
     filename = NULL,
-    results = NULL,
+    real_filename = NULL,
     lookup = NULL,
-    initialize = function(lookup, ...) {
+    results = NULL,
+    initialize = function(lookup, ..., real_filename = NULL) {
       super$initialize(...)
+
+      self$real_filename <- real_filename
 
       self$lookup <- lapply(jsonlite::fromJSON(lookup), function(id_lines) {
         sort(unlist(id_lines, use.names = TRUE), decreasing = TRUE)
@@ -43,24 +52,30 @@ NeotestReporter <- R6::R6Class("NeotestReporter",
     start_reporter = function() {
       self$results <- list()
     },
-
-    # file
     start_file = function(filename) {
       self$filename <- filename
     },
-
-    # test
     start_test = function(context, test) {
-      if (is.null(context)) {
-        testthat::context_start_file(self$filename)
+      if (
+        !is.null(self$real_filename) &&
+          grepl("neotest-[a-zA-Z0-9]+", context)
+      ) {
+        context_start_file(basename(self$real_filename))
+      } else if (is.null(context)) {
+        context_start_file(self$filename)
       }
     },
     add_result = function(context, test, result) {
-      srcfile <- attr(result$srcref, "srcfile")
-      filename <- normalizePath(
-        paste0(srcfile$wd, "/", srcfile$filename),
-        mustWork = TRUE
-      )
+      filename <- if (is.null(self$real_filename)) {
+        srcfile <- attr(result$srcref, "srcfile")
+        normalizePath(
+          paste0(srcfile$wd, "/", srcfile$filename),
+          mustWork = TRUE
+        )
+      } else {
+        self$real_filename
+      }
+
       expectation_line <- result$srcref[1]
       id_lines <- self$lookup[[filename]]
       id <- names(self$lookup[[filename]][id_lines <= expectation_line][1])
@@ -69,7 +84,9 @@ NeotestReporter <- R6::R6Class("NeotestReporter",
 
       neotest_result <- self$get_current_test_result()
 
-      if (testthat:::expectation_success(result) && is.null(neotest_result$status)) {
+      if (
+        testthat:::expectation_success(result) && is.null(neotest_result$status)
+      ) {
         neotest_result$status <- "passed"
       } else if (testthat:::expectation_skip(result)) {
         neotest_result$status <- "skipped"
@@ -125,28 +142,44 @@ NeotestReporter <- R6::R6Class("NeotestReporter",
   ), # public
 )
 
-
-args <- parse_args()
-
-reporter <- testthat::MultiReporter$new(
-  reporters = list(
-    NeotestReporter$new(file = args$out, lookup = args$lookup),
-    testthat::ProgressReporter$new()
-  )
-)
-
-if (identical(args$type, "dir")) {
-  testthat::test_dir(
-    args$path,
-    reporter = reporter,
-    load_package = "source"
-  )
-} else if (identical(args$type, "file")) {
-  testthat::test_file(
-    args$path,
-    reporter = reporter,
-    load_package = "source"
-  )
-} else {
-  stop("Unsupported type: ", args$type)
+# helper functions
+`%||%` <- function(x, y) {
+  if (is.null(x)) y else x
 }
+
+parse_args <- function() {
+  raw <- commandArgs(trailingOnly = TRUE)
+
+  pointer <- 1L
+  args <- list()
+  while (pointer <= length(raw)) {
+    curr <- raw[pointer]
+    if (grepl("^--", curr)) {
+      pointer <- pointer + 1
+      name <- sub("^--", "", curr)
+      args[[name]] <- raw[pointer]
+    } else {
+      stop("Failed to parse commandline argument: ", curr)
+    }
+    pointer <- pointer + 1
+  }
+
+  args
+}
+
+test_single <- function(root) {
+  function(path, ...) {
+    rand_chars <- c(letters, LETTERS, as.character(0:9))
+    suffix <- paste(sample(rand_chars, 10, replace = TRUE), collapse = "")
+
+    temp <- file.path(
+      root, "tests", "testthat", paste0("test-neotest-", suffix, ".R")
+    )
+    on.exit(file.remove(temp))
+    file.copy(from = path, to = temp)
+    test_file(temp, ...)
+  }
+}
+
+# run tests
+main()
