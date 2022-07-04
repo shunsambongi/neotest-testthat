@@ -21,19 +21,19 @@ local normalize_path = function(path)
 end
 
 ---@type neotest.Adapter
-local RNeotestAdapter = { name = 'neotest-r' }
+local TestthatNeotestAdapter = { name = 'neotest-testthat' }
 
-RNeotestAdapter.root = lib.files.match_root_pattern 'DESCRIPTION'
+TestthatNeotestAdapter.root = lib.files.match_root_pattern 'DESCRIPTION'
 
 ---@return boolean
-RNeotestAdapter.is_test_file = function(file_path)
+TestthatNeotestAdapter.is_test_file = function(file_path)
   file_path = normalize_path(file_path)
   return file_path:match 'tests/testthat/test.*%.[rR]$'
 end
 
 ---@async
 ---@return neotest.Tree | nil
-RNeotestAdapter.discover_positions = function(file_path)
+TestthatNeotestAdapter.discover_positions = function(file_path)
   local query = [[
     (
       (call
@@ -134,7 +134,7 @@ end
 ---@async
 ---@param args neotest.RunArgs
 ---@return neotest.RunSpec
-RNeotestAdapter.build_spec = function(args)
+TestthatNeotestAdapter.build_spec = function(args)
   local position = args.tree:data()
   local path = position.path
 
@@ -166,7 +166,7 @@ RNeotestAdapter.build_spec = function(args)
   -- stylua: ignore
   local script_args = {
     '--type', position.type,
-    '--root', RNeotestAdapter.root(position.path),
+    '--root', TestthatNeotestAdapter.root(position.path),
     '--path', path,
     '--realpath', position.path,
     '--out', out,
@@ -186,7 +186,7 @@ end
 ---@param result neotest.StrategyResult
 ---@param tree neotest.Tree
 ---@return table<string, neotest.Result>
-RNeotestAdapter.results = function(spec, result, tree)
+TestthatNeotestAdapter.results = function(spec, result, tree)
   local ok, data = pcall(lib.files.read, spec.context.out)
   if not ok then
     data = '{}'
@@ -196,4 +196,4 @@ RNeotestAdapter.results = function(spec, result, tree)
   return results
 end
 
-return RNeotestAdapter
+return TestthatNeotestAdapter
