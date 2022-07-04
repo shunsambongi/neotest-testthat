@@ -7,7 +7,7 @@ main <- function() {
     file = args$out, lookup = args$lookup
   )
 
-  if (identical(args$type, "test")) {
+  if (identical(args$type, "test") || identical(args$type, "namespace")) {
     neotest_reporter$real_filename <- normalizePath(
       args$realpath,
       mustWork = TRUE
@@ -21,8 +21,9 @@ main <- function() {
   run_test <- switch(args$type,
     dir = test_dir,
     file = test_file,
-    test = test_single(args$root),
-    stop("Unsupported type: ", args$type)
+    test = test_pruned(args$root),
+    namespace = test_pruned(args$root),
+    stop("Unsupported test node type: ", args$type)
   )
 
   run_test(args$path, reporter = reporter, load_package = "source")
@@ -167,11 +168,10 @@ parse_args <- function() {
   args
 }
 
-test_single <- function(root) {
+test_pruned <- function(root) {
   function(path, ...) {
     rand_chars <- c(letters, LETTERS, as.character(0:9))
     suffix <- paste(sample(rand_chars, 10, replace = TRUE), collapse = "")
-
     temp <- file.path(
       root, "tests", "testthat", paste0("test-neotest-", suffix, ".R")
     )

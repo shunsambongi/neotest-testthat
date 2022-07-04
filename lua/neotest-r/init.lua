@@ -72,17 +72,17 @@ RNeotestAdapter.discover_positions = function(file_path)
   return lib.treesitter.parse_positions(file_path, query, {})
 end
 
-local remove_test_node = function(lines, node)
-  local start_line = node.range[1] + 1
-  local end_line = node.range[3] + 1
+local prune_test = function(lines, position)
+  local start_line = position.range[1] + 1
+  local end_line = position.range[3] + 1
 
   if start_line == end_line then
-    lines[start_line] = string.sub(lines[start_line], node.range[2] + 1, node.range[4])
+    lines[start_line] = string.sub(lines[start_line], position.range[2] + 1, position.range[4])
     return
   end
 
-  lines[start_line] = string.sub(lines[start_line], 1, node.range[2])
-  lines[end_line] = string.sub(lines[end_line], node.range[4] + 1, #lines[end_line])
+  lines[start_line] = string.sub(lines[start_line], 1, position.range[2])
+  lines[end_line] = string.sub(lines[end_line], position.range[4] + 1, #lines[end_line])
 
   if end_line - start_line == 1 then
     return
@@ -102,24 +102,24 @@ local write_temp_test_file = function(file_path, content)
   assert(not close_err, close_err)
 end
 
----@async
 ---@param args neotest.RunArgs
----@return string
-local generate_single_test_file = function(args)
-  local test = args.tree:data()
+---@param keep_node fun(node: neotest.Tree): boolean
+local generate_pruned_test_file = function(args, keep_node)
+  local position = args.tree:data()
 
   local file
   for parent in args.tree:iter_parents() do
-    if parent:data().path == test.path then
+    if parent:data().path == position.path then
       file = parent
     end
   end
 
-  local lines = lib.files.read_lines(test.path)
+  local lines = lib.files.read_lines(position.path)
 
-  for _, node in file:iter() do
-    if node.type == 'test' and node.id ~= test.id then
-      remove_test_node(lines, node)
+  for _, node in file:iter_nodes() do
+    local node_position = node:data()
+    if node_position.type == 'test' and not keep_node(node) then
+      prune_test(lines, node_position)
     end
   end
 
@@ -139,7 +139,18 @@ RNeotestAdapter.build_spec = function(args)
   local path = position.path
 
   if position.type == 'test' then
-    path = generate_single_test_file(args)
+    path = generate_pruned_test_file(args, function(node)
+      return node:data().id == position.id
+    end)
+  elseif position.type == 'namespace' then
+    path = generate_pruned_test_file(args, function(node)
+      for parent in node:iter_parents() do
+        if parent:data().id == position.id then
+          return true
+        end
+      end
+      return false
+    end)
   end
 
   local lookup = {}
